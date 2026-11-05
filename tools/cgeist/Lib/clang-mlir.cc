@@ -251,34 +251,74 @@ void MLIRScanner::init(mlir::func::FuncOp function, const FunctionDecl *fd) {
     }
   }
 
-  for (auto parm : fd->parameters()) {
+for (auto parm : fd->parameters()) {
     assert(i != function.getNumArguments());
-    // function.getArgument(i).setName(name);
+
+    // translate annotations
+    llvm::SmallVector<mlir::Attribute, 4> annotations;
+
+    for (auto *attr :
+         parm->specific_attrs<clang::AnnotateAttr>()) {
+      annotations.push_back(
+          builder.getStringAttr(attr->getAnnotation()));
+    }
+
+    if (!annotations.empty()) {
+      auto argAttrs = function.getAllArgAttrs();
+
+      if (argAttrs.empty())
+        argAttrs.resize(function.getNumArguments());
+
+      llvm::SmallVector<mlir::NamedAttribute, 4> mergedAttrs;
+
+      // Preserve existing argument attributes.
+      if (argAttrs[i]) {
+        for (auto attr : argAttrs[i].getValue())
+          mergedAttrs.push_back(attr);
+      }
+
+      mergedAttrs.push_back(builder.getNamedAttr(
+          "annotations",
+          builder.getArrayAttr(annotations)));
+
+      argAttrs[i] = builder.getDictionaryAttr(mergedAttrs);
+
+      function.setAllArgAttrs(argAttrs);
+    }
+
     bool isArray = false;
     bool LLVMABI = false;
 
-    if (Glob.getMLIRType(Glob.CGM.getContext().getPointerType(parm->getType()))
+    if (Glob.getMLIRType(
+            Glob.CGM.getContext().getPointerType(parm->getType()))
             .isa<mlir::LLVM::LLVMPointerType>())
       LLVMABI = true;
 
     if (!LLVMABI) {
       Glob.getMLIRType(parm->getType(), &isArray);
     }
-    if (!isArray && isa<clang::ReferenceType>(
-                        parm->getType()->getUnqualifiedDesugaredType()))
+
+    if (!isArray &&
+        isa<clang::ReferenceType>(
+            parm->getType()->getUnqualifiedDesugaredType()))
       isArray = true;
+
     mlir::Value val = function.getArgument(i);
     assert(val);
+
     if (isArray) {
       params.emplace(parm, ValueCategory(val, /*isReference*/ true));
     } else {
-      auto alloc = createAllocOp(val.getType(), parm, /*memspace*/ 0, isArray,
-                                 /*LLVMABI*/ LLVMABI);
+      auto alloc = createAllocOp(
+          val.getType(), parm, /*memspace*/ 0, isArray,
+          /*LLVMABI*/ LLVMABI);
+
       ValueCategory(alloc, /*isReference*/ true)
           .store(getMLIRLocation(parm->getBeginLoc()), builder, val);
     }
+
     i++;
-  }
+}
 
   auto loc = getMLIRLocation(fd->getBeginLoc());
   if (fd->hasAttr<CUDAGlobalAttr>() && Glob.CGM.getLangOpts().CUDA &&
