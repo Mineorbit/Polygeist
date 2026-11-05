@@ -254,8 +254,8 @@ void MLIRScanner::init(mlir::func::FuncOp function, const FunctionDecl *fd) {
 for (auto parm : fd->parameters()) {
     assert(i != function.getNumArguments());
 
-    // translate annotations
-    llvm::SmallVector<mlir::Attribute, 4> annotations;
+// translate annotations
+    std::vector<mlir::Attribute> annotations;
 
     for (auto *attr :
          parm->specific_attrs<clang::AnnotateAttr>()) {
@@ -264,26 +264,37 @@ for (auto parm : fd->parameters()) {
     }
 
     if (!annotations.empty()) {
-      auto argAttrs = function.getAllArgAttrs();
+      auto existingArgAttrs = function.getAllArgAttrs();
+      std::vector<mlir::Attribute> argAttrsVec;
 
-      if (argAttrs.empty())
-        argAttrs.resize(function.getNumArguments());
+      // Copy existing argument attributes if they exist
+      if (existingArgAttrs) {
+        argAttrsVec.assign(existingArgAttrs.begin(), existingArgAttrs.end());
+      }
 
-      llvm::SmallVector<mlir::NamedAttribute, 4> mergedAttrs;
+      // Ensure the vector is large enough to contain index i
+      if (argAttrsVec.size() <= i) {
+        argAttrsVec.resize(function.getNumArguments());
+      }
 
-      // Preserve existing argument attributes.
-      if (argAttrs[i]) {
-        for (auto attr : argAttrs[i].getValue())
-          mergedAttrs.push_back(attr);
+      std::vector<mlir::NamedAttribute> mergedAttrs;
+
+      // Preserve existing argument attributes by safely casting to DictionaryAttr
+      if (argAttrsVec[i]) {
+        if (auto dictAttr = llvm::dyn_cast<mlir::DictionaryAttr>(argAttrsVec[i])) {
+          for (auto attr : dictAttr.getValue())
+            mergedAttrs.push_back(attr);
+        }
       }
 
       mergedAttrs.push_back(builder.getNamedAttr(
           "annotations",
           builder.getArrayAttr(annotations)));
 
-      argAttrs[i] = builder.getDictionaryAttr(mergedAttrs);
+      argAttrsVec[i] = builder.getDictionaryAttr(mergedAttrs);
 
-      function.setAllArgAttrs(argAttrs);
+      // Set the updated argument attributes back onto the function as an ArrayAttr
+      function.setAllArgAttrs(builder.getArrayAttr(argAttrsVec));
     }
 
     bool isArray = false;
