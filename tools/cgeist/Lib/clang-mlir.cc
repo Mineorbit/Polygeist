@@ -288,7 +288,7 @@ for (auto parm : fd->parameters()) {
       }
 
       mergedAttrs.push_back(builder.getNamedAttr(
-          "annotations",
+          "secret.annotations",
           builder.getArrayAttr(annotations)));
 
       argAttrsVec[i] = builder.getDictionaryAttr(mergedAttrs);
